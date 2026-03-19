@@ -143,7 +143,6 @@ class spaLakePopulator(EMProtocol):
                        label="Processing date (mm/yy)",
                        help='Date of the processing')
 
-
     def _initialize(self):
         # DEBUGALBERTO START
         import os
@@ -208,14 +207,15 @@ class spaLakePopulator(EMProtocol):
         listMovies = list(movies)
         total_size = len(listMovies)
         if total_size <= SAMPLE_SIZE:
-            selectedMovies  =  listMovies
+            self.selectedMovies  =  listMovies
         else:
             step = total_size / SAMPLE_SIZE
-            selectedMovies = [listMovies[random.randint(int(i * step), int((i + 1) * step) - 1)] for i in range(SAMPLE_SIZE)]
-            #selectedMovies =  random.sample(listMovies, SAMPLE_SIZE) #Full random
+            self.selectedMovies = [listMovies[random.randint(int(i * step), int((i + 1) * step) - 1)] for i in range(SAMPLE_SIZE)]
+            #self.selectedMovies =  random.sample(listMovies, SAMPLE_SIZE) #Full random
 
         # FRAMES
-
+        self.frameExtraction()
+        self.frameShaping()
 
 
 
@@ -273,6 +273,15 @@ class spaLakePopulator(EMProtocol):
 
         return listObjects
 
+    def frameExtraction(self):
+        '''
+        Extract a single frame the midle one, for any kind of movie, *.tif, *.mrc, *.eer
+        For eer extract to have a dose of 1e-/A2'''
+        pass
+
+    def frameShaping(self):
+        'Crop, Resize and Normalize 0-0; 10-255'
+        pass
     # ----------GENERAL-UTILS
 
     def _summary(self):
