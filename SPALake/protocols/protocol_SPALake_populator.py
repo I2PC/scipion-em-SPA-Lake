@@ -32,7 +32,9 @@ import pyworkflow.utils as pwutils
 import pyworkflow.protocol.params as params
 from pwem.protocols import EMProtocol
 from pyworkflow.protocol import getUpdatedProtocol
+import random
 
+SAMPLE_SIZE = 100
 
 class spaLakePopulator(EMProtocol):
     'This protocol will collect the main data from the SPA workflow and push to the SPALake dataBase those data'
@@ -131,9 +133,15 @@ class spaLakePopulator(EMProtocol):
                        label="Volume refined",
                        help='Volume refined')
 
-
         form.addSection(label=Message.LABEL_EXPORT)
-
+        form.addParam('processingAuthor', params.LabelParam,
+                       allowsNull=True,
+                       label="Processing author",
+                       help='Name of the authors of the processing of the workflow')
+        form.addParam('processingDate', params.LabelParam,
+                       allowsNull=True,
+                       label="Processing date (mm/yy)",
+                       help='Date of the processing')
 
 
     def _initialize(self):
@@ -154,23 +162,97 @@ class spaLakePopulator(EMProtocol):
         initialize = self._insertFunctionStep(self._initialize,
                                  prerequisites=[],
                                  needsGPU=False)
-        collectVolume = self._insertFunctionStep(self.collectVolume,
-                                 prerequisites=[initialize],
-                                 needsGPU=False)
+        listObjects = self.listInputs()
+        hierarchy = ["Movies_screening", "Movies", "micrographs", "TotalClasses2D", "goodClasses", "volume"]
+        print(f'\nhierarchy: {hierarchy}')
+        print(f'listObjects: {listObjects}')
+
+        collectMovies = self._insertFunctionStep(self.collectMovies,
+                                                 listObjects,
+                                                 prerequisites=[initialize],
+                                                 needsGPU=False)
+        if "Movies_screening" in listObjects:
+            collectScreening = self._insertFunctionStep(self.collectScreening,
+                                                     prerequisites=[collectMovies],
+                                                     needsGPU=False)
+        if "micrographs" in listObjects:
+            collectMicrographs = self._insertFunctionStep(self.collectMicrographs,
+                                                     prerequisites=[collectMovies],
+                                                     needsGPU=False)
+        if "TotalClasses2D" in listObjects:
+            collectCoords = self._insertFunctionStep(self.collectCoords,
+                                                            prerequisites=[collectMicrographs],
+                                                            needsGPU=False)
+            collect2DClasses = self._insertFunctionStep(self.collect2DClasses,
+                                                     prerequisites=[collectCoords],
+                                                     needsGPU=False)
+        if "goodClasses" in listObjects:
+            collectGood2DClasses = self._insertFunctionStep(self.collectGood2DClasses,
+                                                            listObjects,
+                                                            prerequisites=[collect2DClasses],
+                                                            needsGPU=False)
+        if "volume" in listObjects:
+            collectVolume = self._insertFunctionStep(self.collectVolume,
+                                                     prerequisites=[collectGood2DClasses],
+                                                     needsGPU=False)
+
+    # ----------COLLECTION
+
+    def collectMovies(self, listObjects):
+        if 'Movies_screening' in listObjects:
+            movies = self.Movies_screening.get()
+        else:
+            movies = self.Movies.get()
+
+        # MOVIES
+        listMovies = list(movies)
+        total_size = len(listMovies)
+        if total_size <= SAMPLE_SIZE:
+            selectedMovies  =  listMovies
+        else:
+            step = total_size / SAMPLE_SIZE
+            selectedMovies = [listMovies[random.randint(int(i * step), int((i + 1) * step) - 1)] for i in range(SAMPLE_SIZE)]
+            #selectedMovies =  random.sample(listMovies, SAMPLE_SIZE) #Full random
+
+        # FRAMES
+
+
+
+
+    def collectScreening(self):
+        pass
+
+    def collectMicrographs(self):
+        pass
+
+    def collectCoords(self):
+        pass
+
+    def collect2DClasses(self):
+        pass
+
+    def collectGood2DClasses(self):
+        pass
+
     def collectVolume(self):
-        print('HOLAAA')
-        if self.goodClasses2DManual.get() == 0:
-            pass
+        pass
 
 
-    def _validate(self):
-        errors = []
+    #----------UTILS
+    def listInputs(self):
         listObjects = []
 
         if self.volume.hasValue() == True:
             listObjects.append('volume')
-        if self.goodClasses2DXmippRelion.hasValue() == True or self.goodClasses2DCryoasses.hasValue() == True:
+        if self.goodClasses2DXmippRelion.hasValue() == True:
             listObjects.append('goodClasses')
+            listObjects.append('goodClasses2DXmippRelion')
+        if self.goodClasses2DCryoasses.hasValue() == True:
+            listObjects.append('goodClasses')
+            listObjects.append('goodClasses2DCryoasses')
+        if self.goodClasses2DManual.hasValue() == True:
+            listObjects.append('goodClasses')
+            listObjects.append('goodClasses2DManual')
         if self.TotalClasses2D.hasValue() == True:
             listObjects.append('TotalClasses2D')
         if self.micrographs.hasValue() == True:
@@ -188,6 +270,26 @@ class spaLakePopulator(EMProtocol):
                 listObjects.append('Grids')
         elif self.Movies.hasValue() == True:
             listObjects.append('Movies')
+
+        return listObjects
+
+    # ----------GENERAL-UTILS
+
+    def _summary(self):
+        summary = []
+        summaryF = self._getExtraPath("summary.txt")
+        if not os.path.exists(summaryF):
+            summary.append("No summary file yet.")
+        else:
+            summaryF = open(summaryF, "r")
+            for line in summaryF.readlines():
+                summary.append(line.rstrip())
+            summaryF.close()
+        return summary
+
+    def _validate(self):
+        errors = []
+        listObjects = self.listInputs()
 
         def validate_list(obj_list):
             hierarchy = ["Movies", "micrographs", "TotalClasses2D", "goodClasses", "volume"]
