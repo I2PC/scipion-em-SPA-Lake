@@ -1,2 +1,2 @@
 
-from .protocol_SPA-Lake_populator import spaLakePopulator
+from .protocol_SPALake_populator import spaLakePopulator
