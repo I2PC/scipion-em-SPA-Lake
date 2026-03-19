@@ -3,22 +3,22 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "scipion-em-SPA-Lake"
+name = "scipion-em-SPALake"
 dynamic = ["version", "dependencies"]
 
 authors = [
     {name = "Alberto Garcia Mena", email = "alberto.garcia@cnb.csic.es"},
 ]
 
-description = "PLugin to collect data from a SPA workflow and push it to the database SPA-Lake"
+description = "PLugin to collect data from a SPA workflow and push it to the database SPALake"
 readme = "README.md"
 requires-python = ">=3.8"
-keywords = ["scipion electron-microscopy cryo-em structural-biology image-processing scipion-3.0 SPA-Lake"]
+keywords = ["scipion electron-microscopy cryo-em structural-biology image-processing scipion-3.0 SPALake"]
 license = {text = "GNU General Public License v3 (GPLv3)"}
 
 [project.urls]
-Homepage = "https://github.com/I2PC/scipion-em-SPA-Lake"
-Issues = "https://github.com/I2PC/scipion-em-SPA-Lake/issues"
+Homepage = "https://github.com/I2PC/scipion-em-SPALake"
+Issues = "https://github.com/I2PC/scipion-em-SPALake/issues"
 
 [tool.setuptools.dynamic]
 version = {attr = "SPALake.version.__version__"}
