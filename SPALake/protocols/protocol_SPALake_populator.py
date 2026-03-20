@@ -43,6 +43,11 @@ from PIL import Image
 import mrcfile
 
 SAMPLE_SIZE = 100
+FRAMES_NUM_EER = 50
+NORMALIZATION_MAX = 10.0
+RESIZE_X = 3680
+RESIZE_Y = 3680
+ZSTD_COMPRESSION_LEVEL = 8 #ZSTD compression level (1: fast - 22:slow but high compression)
 
 class spaLakePopulator(EMProtocol):
     'This protocol will collect the main data from the SPA workflow and push to the SPALake dataBase those data'
@@ -213,29 +218,32 @@ class spaLakePopulator(EMProtocol):
             movies = self.Movies.get()
 
         # MOVIES
-        listMovies = list(movies)
-        total_size = len(listMovies)
+        total_size = len(movies)
         if total_size <= SAMPLE_SIZE:
-            self.selectedMovies  =  listMovies
+            self.selectedMovies = movies
         else:
             step = total_size / SAMPLE_SIZE
-            self.selectedMovies = [listMovies[random.randint(int(i * step), int((i + 1) * step) - 1)] for i in range(SAMPLE_SIZE)]
+            self.selectedMovies = [movies[random.randint(int(i * step), int((i + 1) * step) - 1)] for i in range(SAMPLE_SIZE)]
             #self.selectedMovies =  random.sample(listMovies, SAMPLE_SIZE) #Full random
 
         # ACQUISITION
-        movieToExtract = self.selectedMovies[0]
+        listMovies = list(movies)
+        movieToExtract = listMovies[0]
         acq = movieToExtract.getAcquisition()
         self.voltaje = acq.getVoltage()
-        self.dosePerFrame=acq.getDosePerFrame()
+        self.dosePerFrame = acq.getDosePerFrame()
         self.frames = movieToExtract.getFramesRange()[1]
         self.extension = movieToExtract.getBaseName().split('.')[-1]
 
         # FRAMES
         self.shapeFrame = []
         for m in self.selectedMovies:
-            frame = self.frameExtraction(m)
-            self.shapeFrame.append(self.frameShaping(frame))
-
+            t0 = time.time()
+            frame,  frameResizedPath = self.frameExtraction(m)
+            t1 = time.time()
+            self.shapeFrame.append(self.frameShaping(frame, frameResizedPath))
+            t2 = time.time()
+            print(f'Time frameExtraction: {round(t1-t0,1)}s   TimeResize: {round(t2-t1, 1)}s\n')
 
 
     def collectScreening(self):
@@ -296,26 +304,73 @@ class spaLakePopulator(EMProtocol):
         '''
         Extract a single frame the midle one, for any kind of movie, *.tif, *.mrc, *.eer
         For eer extract to have a dose of 1e-/A2'''
-        #self.voltaje self.dosePerFr self.frames self.extension
         pathMovie = os.path.join(os.getcwd(),  movie.getLocation()[1])
         frame_index = int(self.frames / 2)
-        if self.extension in ["tif", "tiff"]:
-            with tiff.TiffFile(pathMovie) as tif:
-                frame = tif.pages[frame_index].asarray().astype(np.float16)
-        elif self.extension == "mrc":
-            with mrcfile.open(pathMovie, permissive=True) as mrc:
-                data = mrc.data.astype(np.float16)
-                frame = data[frame_index]
-        elif self.extension == 'eer':
+        if self.extension == 'eer':
             nameFramePath = os.path.join(os.getcwd(), self._getExtraPath(), movie.getBaseName().replace('.eer', '_middleFrame.tif'))
-            framesNum = 100
-            frame_index= 50
-            cmd = f'{frame_index}@{pathMovie}#{framesNum},4K,uint8 -o {nameFramePath}'
+            frameResizedPath = os.path.join(os.getcwd(), self._getExtraPath(), movie.getBaseName().replace('.eer', '_frameResized.tif'))
+            cmd = f'{int(FRAMES_NUM_EER/2)}@{pathMovie}#{FRAMES_NUM_EER},4K,uint8 -o {nameFramePath}'
             self.runJob('xmipp_image_convert', cmd, env=xmipp3.Plugin.getEnviron())
+            with tiff.TiffFile(nameFramePath) as tif:
+                frame = tif.pages[0].asarray().astype(np.uint8)
+            if os.path.exists(nameFramePath):
+                os.remove(nameFramePath)
+        elif self.extension in ["tif", "tiff"]:
+            frameResizedPath = os.path.join(os.getcwd(), self._getExtraPath(), movie.getBaseName().replace('.tif', '_frameResized.tif'))
+            with tiff.TiffFile(pathMovie) as tif:
+                frame = tif.pages[frame_index].asarray().astype(np.uint8)
+        elif self.extension == "mrc":
+            frameResizedPath = os.path.join(os.getcwd(), self._getExtraPath(), movie.getBaseName().replace('.mrc', '_frameResized.tif'))
+            with mrcfile.open(pathMovie, permissive=True) as mrc:
+                data = mrc.data.astype(np.uint8)
+                frame = data[frame_index]
 
-    def frameShaping(self, frame):
-        'Crop, Resize and Normalize 0-0; 10-255'
-        pass
+        return frame, frameResizedPath
+
+
+    def frameShaping(self, frame, frameResizedPath):
+        '''
+        - Normalize (10->255)
+        - Crop Square (upperRight)
+        - Resize 3680x3680 (Lanczos (sinc(x)*sinc(x/a)
+
+        K2: 3838x3710 (7676x7420 HD)
+        K3: 5760x4092 (11520x8184 HD) eer
+        Falcon3: 4096x4096
+        Falcon4: 4096x4096
+        '''
+        # --- CROP ---
+        img = Image.fromarray(frame)
+        w, h = img.size
+        if w != h:
+            side = min(w, h)
+            img = img.crop((0, 0, side, side))
+
+        # --- RESIZE ---
+        img_resized = img.resize((RESIZE_X, RESIZE_Y), Image.LANCZOS)
+        imgResized = np.array(img_resized)
+
+        # --- NORMALIZATION ---
+        scale = 255.0 / NORMALIZATION_MAX
+        normFrame = (imgResized * scale).astype(np.uint8)
+
+        # --- COMPRESS ---
+        try:
+            import imagecodecs
+            compression = "zstd"
+            compressionargs = {"level": ZSTD_COMPRESSION_LEVEL}
+        except ImportError:
+            self.warning("[WARNING] imagecodecs not installed ? falling back to LZW")
+            compression = "lzw"
+            compressionargs = {}
+
+        tiff.imwrite(
+            frameResizedPath,
+            normFrame,
+            compression=compression,
+            compressionargs=compressionargs,
+        )
+
     # ----------GENERAL-UTILS
 
     def _summary(self):
