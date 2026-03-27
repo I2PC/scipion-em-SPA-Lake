@@ -383,7 +383,7 @@ class spaLakePopulator(EMProtocol):
                 self.particleDict[p.getObjId()] = {
                     'obj': p,
                     'isGood': None,
-                    'isOnMovieSet': p.getCoordinate().getMicName() in self.micsDict,
+                    'isOnMovieSet': p.getCoordinate().getMicName() in self.moviesDict,
                     'classId': c.getObjId(),
                     'micName': p.getCoordinate().getMicName(),
                     'micId': p.getCoordinate().getMicId(),
@@ -442,7 +442,7 @@ class spaLakePopulator(EMProtocol):
                 self.particleDict[p.getObjId()] = {
                     'obj': p,
                     'isGood': True,
-                    'isOnMovieSet': p.getCoordinate().getMicName() in self.micsDict,
+                    'isOnMovieSet': p.getCoordinate().getMicName() in self.moviesDict,
                     'classId': c.getObjId(),
                     'micName': p.getCoordinate().getMicName(),
                     'micId': p.getCoordinate().getMicId(),
@@ -463,7 +463,7 @@ class spaLakePopulator(EMProtocol):
                     'obj': p,
                     'isGood': False,
                     'classId': c.getObjId(),
-                    'isOnMovieSet': p.getCoordinate().getMicName() in self.micsDict,
+                    'isOnMovieSet': p.getCoordinate().getMicName() in self.moviesDict,
                     'micName': p.getCoordinate().getMicName(),
                     'micId': p.getCoordinate().getMicId(),
                     'coordX': p.getCoordinate().getX(),
