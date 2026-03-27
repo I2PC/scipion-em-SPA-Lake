@@ -30,6 +30,8 @@ import pyworkflow.utils as pwutils
 import pyworkflow.protocol.params as params
 from pwem.protocols import EMProtocol
 from pyworkflow.protocol import getUpdatedProtocol
+from pwem.objects import SetOfClasses2D, SetOfAverages, Class2D
+
 
 #External
 import os
@@ -44,7 +46,7 @@ import os
 from PIL import Image
 import mrcfile
 
-SAMPLE_SIZE = 20
+SAMPLE_SIZE = 10
 FRAMES_NUM_EER = 50
 NORMALIZATION_MAX = 10.0
 RESIZE_X = 3680
@@ -221,7 +223,6 @@ class spaLakePopulator(EMProtocol):
                                                                         needsGPU=False)
                 elif "TotalClasses2D" in listObjects:
                     collect2DClasses = self._insertFunctionStep(self.collect2DClasses,
-                                                                    listObjects,
                                                                     prerequisites=[collectCTF],
                                                                     needsGPU=False)
                 else:
@@ -273,6 +274,8 @@ class spaLakePopulator(EMProtocol):
         self.extension = movieToExtract.getBaseName().split('.')[-1]
 
         # FRAMES
+        self.info('\n-----------------\nCollecting Frames...')
+
         self.frameDict = {}
         for m in self.selectedMovies:
             t0 = time.time()
@@ -332,11 +335,11 @@ class spaLakePopulator(EMProtocol):
         '''
         self.info('\n-----------------\nCollecting Micrographs...')
 
-        setOfMics = self.micrographs.get()
+        self.setOfMics = self.micrographs.get()
         self.micsDict = {}
         for m in self.moviesDict.values():
             try:
-                mic = setOfMics.getItem('_micName', m['obj'].getBaseName())
+                mic = self.setOfMics.getItem('_micName', m['obj'].getBaseName())
                 self.micsDict[mic.getMicName()] = {
                     'obj': mic,
                     'lake_ID': None
@@ -365,28 +368,110 @@ class spaLakePopulator(EMProtocol):
 
 
 
-    def collectCoords(self):
-        self.info('\n-----------------\nCollecting Coords...')
-        setOfCoords = self.coords.get()
-
-
-
     def collect2DClasses(self):
         self.info('\n-----------------\nCollecting collect2DClasses...')
-        setOf2DClasses= self.TotalClasses2D.get()
+        self.setOf2DClasses = self.TotalClasses2D.get()
         self.Dict2D = {}
-        for p in setOf2DClasses.iterClassItems(): #iterRows
-            mic_name = p.getCoordinate().getMicName()
+        for c in self.setOf2DClasses:#TODO test it
+            self.ClassDict[c.getObjId()] = {
+                'obj': c,
+                'isGood': None,
+                'numParticles': len(c),
+                'lake_ID': None
+            }
+            for p in c.iterItems():
+                self.particleDict[p.getObjId()] = {
+                    'obj': p,
+                    'isGood': None,
+                    'isOnMovieSet': p.getCoordinate().getMicName() in self.micsDict,
+                    'classId': c.getObjId(),
+                    'micName': p.getCoordinate().getMicName(),
+                    'micId': p.getCoordinate().getMicId(),
+                    'coordX': p.getCoordinate().getX(),
+                    'coordY': p.getCoordinate().getY(),
+                    'lake_ID': None
+                }
 
 
 
     def collectWithGood2DClasses(self):
         self.info('\n-----------------\nCollecting collectWithGood2DClasses...')
-        setOf2DClasses = self.TotalClasses2D.get()
+        self.total2DClasses = self.TotalClasses2D.get()
+
         if self.goodClassesOrigin.get() == 0:
-            setOfGood2D = self.goodClasses2DXmippRelionManual.get()
+            self.goodC = self.goodClasses2DXmippRelionManual.get()
         else:
-            setOfGood2D = self.goodClasses2DCryoasses.get()
+            self.goodC = SetOfClasses2D.create(outputPath=self._getPath(), prefix='_goodC')
+            self.goodC.copyInfo(self.total2DClasses)
+            listGood = []
+            for c in self.goodClasses2DCryoasses.get().iterItems():
+                listGood.append(c.getIndex())
+            enableFunc = lambda cls: cls.getObjId() in listGood
+            self.goodC.appendFromClasses(self.total2DClasses, filterClassFunc=enableFunc)
+
+
+        self.badC = []
+        for t in self.total2DClasses:
+            flag = False
+            for g in self.goodC:
+                if t.getObjId() == g.getObjId():
+                    flag = True
+                    break
+            if flag == False:
+                self.badC.append(t)
+
+        self.info(f'Total classe: {len(self.total2DClasses)} Good Classe: {len(self.goodC)}')
+        totalParticlesNum = sum(c.getSize() for c in self.total2DClasses.iterItems())
+        goodParticlesNum = sum(c.getSize() for c in self.goodC.iterItems())
+        self.info(f'Total particles: {totalParticlesNum}\n'
+                  f'Good particles: {goodParticlesNum}\n'
+                  f'Bad particles: {totalParticlesNum - goodParticlesNum}')
+
+        self.ClassDict = {}
+        self.particleDict = {}
+        self.info('Collecting good particles...')
+
+        for c in self.goodC:
+            self.ClassDict[c.getObjId()] = {
+                'obj': c,
+                'isGood': True,
+                'numParticles': len(c),
+                'lake_ID': None
+            }
+            for p in c.iterItems():
+                self.particleDict[p.getObjId()] = {
+                    'obj': p,
+                    'isGood': True,
+                    'isOnMovieSet': p.getCoordinate().getMicName() in self.micsDict,
+                    'classId': c.getObjId(),
+                    'micName': p.getCoordinate().getMicName(),
+                    'micId': p.getCoordinate().getMicId(),
+                    'coordX': p.getCoordinate().getX(),
+                    'coordY': p.getCoordinate().getY(),
+                    'lake_ID': None
+                }
+        self.info('Collecting bad particles...')
+        for c in self.badC:
+            self.ClassDict[c.getObjId()] = {
+                'obj': c,
+                'isGood': False,
+                'numParticles': len(c),
+                'lake_ID': None
+            }
+            for p in c.iterItems():
+                self.particleDict[p.getObjId()] = {
+                    'obj': p,
+                    'isGood': False,
+                    'classId': c.getObjId(),
+                    'isOnMovieSet': p.getCoordinate().getMicName() in self.micsDict,
+                    'micName': p.getCoordinate().getMicName(),
+                    'micId': p.getCoordinate().getMicId(),
+                    'coordX': p.getCoordinate().getX(),
+                    'coordY': p.getCoordinate().getY(),
+                    'lake_ID': None
+                }
+
+        print('Hello')
 
     def collectVolume(self):
         pass
